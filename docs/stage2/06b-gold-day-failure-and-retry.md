@@ -29,4 +29,4 @@ against PostgreSQL. The retry is a second direct invocation of the gold
 wrapper, not an automatically retried Airflow task.
 
 Automatic silver retry was verified separately.
-The automatic gold task retry remains an integration check.
+Automatic gold task retry is verified separately in checkpoint 6d.
