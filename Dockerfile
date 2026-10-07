@@ -1,6 +1,12 @@
+FROM docker:29-cli AS docker_tools
+
 FROM python:3.13-slim
 
 WORKDIR /app
+
+COPY --from=docker_tools /usr/local/bin/docker /usr/local/bin/docker
+COPY --from=docker_tools /usr/local/libexec/docker/cli-plugins/ /usr/local/libexec/docker/cli-plugins/
+COPY --from=ghcr.io/casey/just:latest /just /usr/local/bin/just
 
 COPY requirements.txt .
 

@@ -1,3 +1,38 @@
+name: meridian-bike-pipeline
+
+x-airflow-common: &airflow-common
+  build: .
+  entrypoint: airflow
+  environment:
+    AIRFLOW_HOME: /opt/airflow
+    PYTHONPATH: /app
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://meridian:meridian@db/meridian
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    AIRFLOW__CORE__DAGS_FOLDER: /opt/airflow/dags
+    AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+    AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "true"
+    AIRFLOW__CORE__PARALLELISM: "64"
+    AIRFLOW__CORE__MAX_ACTIVE_RUNS_PER_DAG: "16"
+    AIRFLOW__CORE__MAX_ACTIVE_TASKS_PER_DAG: "32"
+    AIRFLOW__CORE__EXECUTION_API_SERVER_URL: http://airflow-api-server:8080/execution/
+    AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_USERS: admin:admin
+    AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_PASSWORDS_FILE: /opt/airflow/logs/simple_auth_passwords.json
+    AIRFLOW__API_AUTH__JWT_SECRET: meridian-local-development-jwt-secret
+    AIRFLOW__API__SECRET_KEY: meridian-local-development-api-secret
+    DB_HOST: db
+    DB_NAME: meridian
+    DB_USER: meridian
+    DB_PASSWORD: meridian
+    COMPOSE_PROJECT_NAME: meridian-bike-pipeline
+    MERIDIAN_PROJECT_DIR: "${PWD}"
+  volumes:
+    - ./airflow/dags:/opt/airflow/dags:ro
+    - ./airflow/plugins:/opt/airflow/plugins:ro
+    - ./src:/app/src:ro
+    - airflow_logs:/opt/airflow/logs
+    - "${PWD}:${PWD}:ro"
+    - /var/run/docker.sock:/var/run/docker.sock
+
 services:
   db:
     image: postgres:17
@@ -26,45 +61,15 @@ services:
         condition: service_healthy
 
   airflow-init:
-    build: .
-    entrypoint: /bin/sh
-    command:
-      - -c
-      - |
-        airflow db migrate &&
-        airflow users create \
-          --username admin \
-          --password admin \
-          --firstname Meridian \
-          --lastname Admin \
-          --role Admin \
-          --email admin@example.com || true
-    environment: &airflow-environment
-      AIRFLOW_HOME: /opt/airflow
-      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://meridian:meridian@db/meridian
-      AIRFLOW__CORE__DAGS_FOLDER: /opt/airflow/dags
-      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
-      DB_HOST: db
-      DB_NAME: meridian
-      DB_USER: meridian
-      DB_PASSWORD: meridian
-    volumes:
-      - ./airflow/dags:/opt/airflow/dags
-      - ./src:/app/src
-      - airflow_logs:/opt/airflow/logs
+    <<: *airflow-common
+    command: ["db", "migrate"]
     depends_on:
       db:
         condition: service_healthy
 
   airflow-api-server:
-    build: .
-    entrypoint: airflow
+    <<: *airflow-common
     command: api-server
-    environment: *airflow-environment
-    volumes:
-      - ./airflow/dags:/opt/airflow/dags
-      - ./src:/app/src
-      - airflow_logs:/opt/airflow/logs
     ports:
       - "8080:8080"
     depends_on:
@@ -72,27 +77,15 @@ services:
         condition: service_completed_successfully
 
   airflow-scheduler:
-    build: .
-    entrypoint: airflow
+    <<: *airflow-common
     command: scheduler
-    environment: *airflow-environment
-    volumes:
-      - ./airflow/dags:/opt/airflow/dags
-      - ./src:/app/src
-      - airflow_logs:/opt/airflow/logs
     depends_on:
       airflow-init:
         condition: service_completed_successfully
 
   airflow-dag-processor:
-    build: .
-    entrypoint: airflow
+    <<: *airflow-common
     command: dag-processor
-    environment: *airflow-environment
-    volumes:
-      - ./airflow/dags:/opt/airflow/dags
-      - ./src:/app/src
-      - airflow_logs:/opt/airflow/logs
     depends_on:
       airflow-init:
         condition: service_completed_successfully
