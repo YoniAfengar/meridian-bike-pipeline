@@ -1,5 +1,10 @@
 # 🚲 Meridian Bike Pipeline
 
+![Python](https://img.shields.io/badge/Python-3.13-blue?logo=python&logoColor=white)
+![PostgreSQL](https://img.shields.io/badge/PostgreSQL-17-blue?logo=postgresql&logoColor=white)
+![Docker](https://img.shields.io/badge/Docker-Compose-blue?logo=docker&logoColor=white)
+![Stage](https://img.shields.io/badge/Stage_1-Complete-brightgreen)
+
 > A production-style data engineering pipeline for ingesting, validating, transforming, and analyzing Citi Bike trip data across multiple markets and schema generations.
 
 Built with **Python, PostgreSQL, Docker Compose, and Just**.
