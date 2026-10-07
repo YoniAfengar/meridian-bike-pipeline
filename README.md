@@ -1,353 +1,278 @@
-# 🚲 Meridian Bike Pipeline
+# Meridian Bike Pipeline
 
-![Python](https://img.shields.io/badge/Python-3.13-blue?logo=python&logoColor=white)
-![PostgreSQL](https://img.shields.io/badge/PostgreSQL-17-blue?logo=postgresql&logoColor=white)
-![Docker](https://img.shields.io/badge/Docker-Compose-blue?logo=docker&logoColor=white)
-![Stage](https://img.shields.io/badge/Stage_1-Complete-brightgreen)
+A data engineering project built with Python, PostgreSQL 17,
+Docker Compose, Just and Apache Airflow 3.1.0.
 
-> A production-style data engineering pipeline for ingesting, validating, transforming, and analyzing Citi Bike trip data across multiple markets and schema generations.
+The pipeline loads Citi Bike trip data into Bronze, normalizes historical
+and modern schemas in Silver, and produces daily station metrics in Gold.
 
-Built with **Python, PostgreSQL, Docker Compose, and Just**.
+Stage 2 adds scheduling, publication waits, retries, backfills and coverage
+tracking around the unchanged Stage 1 jobs.
 
----
+## Project status
 
-## 🎯 Project Overview
+Stages 1 and 2 are implemented. Validation results and their scope are
+documented in [Stage 2 checkpoints](docs/stage2/).
 
-Citi Bike publishes years of trip data, but building a reliable pipeline over that history is not as simple as downloading CSV files.
+This is a local development stack. It uses development credentials and
+mounts the Docker socket so Airflow can launch the existing Silver job.
 
-The source data contains several real-world data engineering challenges:
+## Requirements
 
-- Different schemas across historical and modern datasets
-- Different publishing conventions for NYC and Jersey City
-- Changing file extensions and object naming patterns
-- Duplicate historical exports
-- Invalid trips that must be quarantined rather than deleted
-- Large monthly datasets with more than one million rows
-- Pipelines that must remain reproducible and idempotent
+- Docker with Docker Compose
+- Just
+- Bash
+- Internet access for image builds and source downloads
+- Python 3 for the host-side validation scripts
 
-This project handles those problems through a **Bronze → Silver → Gold** architecture while keeping every pipeline layer independently runnable.
+Run commands from the repository root.
 
-### Current Status
-
-**Stage 1 — The Shape of the Job ✅**
-
-The first stage implements the complete ingestion and transformation path:
-
-`Citi Bike S3 → Bronze → Silver → Gold → Station Daily Report`
-
-Future stages will extend the platform with additional production-grade capabilities.
-
----
-## 🏗️ Architecture
-
-The project follows a **Medallion Architecture**, separating raw source data, validated analytical data, and business-level aggregates.
-
-```text
-                       Citi Bike S3
-                            │
-                            │  XML object listing
-                            │  + published ZIP/CSV data
-                            ▼
-                 ┌─────────────────────┐
-                 │       BRONZE        │
-                 │─────────────────────│
-                 │ Raw published bytes │
-                 │ Source provenance   │
-                 │ No data cleaning    │
-                 └──────────┬──────────┘
-                            │
-                            │ schema detection
-                            │ validation
-                            ▼
-                 ┌─────────────────────┐
-                 │       SILVER        │
-                 │─────────────────────│
-                 │ Conformed trips     │
-                 │ Typed fields        │
-                 │ Valid trip records  │
-                 └──────────┬──────────┘
-                            │
-                  invalid   │   valid
-                   rows     │
-                    ┌───────┘
-                    ▼
-          ┌─────────────────────┐
-          │  REJECT QUARANTINE  │
-          │─────────────────────│
-          │ Original row        │
-          │ Rejection reason    │
-          └─────────────────────┘
-
-                            │
-                            │ daily aggregation
-                            ▼
-                 ┌─────────────────────┐
-                 │        GOLD         │
-                 │─────────────────────│
-                 │ Station + Day grain │
-                 │ Departures          │
-                 │ Arrivals            │
-                 └──────────┬──────────┘
-                            │
-                            ▼
-                 Daily Station Report
-```
-
-### Layer Responsibilities
-
-| Layer | Responsibility | Rebuildable? |
-|---|---|---|
-| 🥉 **Bronze** | Preserve the published source data and its provenance | No |
-| 🥈 **Silver** | Normalize schemas, validate trips, and quarantine invalid records | Yes — from Bronze |
-| 🥇 **Gold** | Produce business-ready daily station metrics | Yes — from Silver |
-
-### Pipeline Jobs
-
-```text
-ingest-to-bronze
-        ↓
-transform-to-silver
-        ↓
-transform-to-gold
-        ↓
-daily-station-trips
-```
-
-Each transformation layer reads only from the layer directly before it. Network access is required only during ingestion.
-
----
-## 🧠 Engineering Challenges
-
-This project is intentionally built around real data engineering problems rather than a perfectly clean dataset.
-
-### 1. Schema Evolution
-
-Citi Bike changed its trip schema over time.
-
-Historical datasets use fields such as:
-
-`start station id`, `starttime`, `stoptime`
-
-Modern datasets use:
-
-`start_station_id`, `started_at`, `ended_at`
-
-Instead of relying on a hardcoded global cutover date, the Silver transformation detects the available columns and maps both schema generations into one consistent model.
-
-### 2. NYC April 2018 — Multiple Published Exports
-
-The NYC 2018 archive contains April data more than once.
-
-Blindly processing every matching CSV would double-count trips and corrupt downstream aggregates.
-
-The ingestion layer deliberately selects the publisher-backed April export under `4_April/`, producing exactly:
-
-**1,307,543 trips**
-
-No raw-row deduplication is used to hide the publishing problem.
-
-### 3. Data Quality Without Data Loss
-
-A trip is considered countable only when it contains:
-
-- Start station identifier
-- End station identifier
-- Start timestamp
-- End timestamp
-
-Invalid rows are **never silently dropped**.
-
-They are written to a reject quarantine together with the original row and a human-readable reason, allowing the pipeline to preserve bad data for investigation.
-
-For Jersey City, June 2026:
-
-- **109,897** published rows
-- **109,510** valid Silver trips
-- **387** quarantined rows
-
-### 4. Idempotent Processing
-
-Every pipeline job can be rerun for the same window without creating duplicate records.
-
-Silver windows are rebuilt deterministically from Bronze, while Gold daily aggregates are rebuilt from Silver.
-
-This makes retries safe and keeps pipeline outputs reproducible.
-
-### 5. Explicit Processing Grains
-
-Trip jobs operate on exact monthly windows:
-
-`YYYY-MM`
-
-Station aggregates operate on exact daily windows:
-
-`YYYY-MM-DD`
-
-Invalid grains fail immediately with a non-zero exit code instead of producing partial or ambiguous results.
-
----
-
-## ✅ Verified Results
-
-The pipeline was validated against known Citi Bike publishing counts and business outputs.
-
-| Dataset | Bronze Rows | Silver Rows | Rejects |
-| --- | ---: | ---: | ---: |
-| JC — 2019-06 | 39,430 | 39,430 | 0 |
-| JC — 2026-06 | 109,897 | 109,510 | 387 |
-| NYC — 2018-04 | 1,307,543 | 1,307,543 | 0 |
-
-### Gold Validation
-
-For Jersey City station `JC115` on `2026-06-02`:
-
-```json
-{
-  "market": "jc",
-  "station": "JC115",
-  "day": "2026-06-02",
-  "departures": 216,
-  "arrivals": 209
-}
-```
-
-### Reliability Checks
-
-- ✅ Idempotent Silver reruns
-- ✅ Idempotent Gold reruns
-- ✅ Fresh database initialization
-- ✅ Explicit failure on incorrect window grains
-- ✅ Silver rebuilds from Bronze
-- ✅ Gold rebuilds from Silver
-- ✅ Empty-safe inspection before data is loaded
-
----
-
-## 🚀 Quick Start
-
-### 1. Start the database
+## Start the stack
 
 ```bash
+docker compose build
 just up
 ```
 
-### 2. Ingest a monthly dataset into Bronze
+`just up` initializes the operational tables, starts Airflow and the
+warehouse, and switches every market schedule off on each invocation.
 
-```bash
-just run ingest-to-bronze trips:jc 2026-06
-```
-
-### 3. Transform Bronze → Silver
-
-```bash
-just run transform-to-silver trips:jc 2026-06
-```
-
-### 4. Build the daily Gold aggregate
-
-```bash
-just run transform-to-gold station-daily 2026-06-02
-```
-
-### 5. Inspect pipeline layers
-
-```bash
-just inspect bronze trips:jc 2026-06
-just inspect silver trips:jc 2026-06
-```
-
-### 6. Query the business result
-
-```bash
-just report daily-station-trips jc JC115 2026-06-02
-```
-
-Expected output:
-
-```json
-{
-  "market": "jc",
-  "station": "JC115",
-  "day": "2026-06-02",
-  "departures": 216,
-  "arrivals": 209
-}
-```
-
-### 7. Stop the stack
+The Airflow UI is available at http://localhost:8080.
+The Simple Auth Manager generates the admin password in
+`/opt/airflow/logs/simple_auth_passwords.json` inside the Airflow containers.
 
 ```bash
 just down
 ```
----
-## 🛠️ Tech Stack
 
-| Technology | Role |
-| --- | --- |
-| **Python** | Ingestion, transformation, validation, and CLI |
-| **PostgreSQL** | Persistent storage for Bronze, Silver, rejects, and Gold |
-| **Docker** | Reproducible application runtime |
-| **Docker Compose** | Database and application orchestration |
-| **Just** | Simple and consistent pipeline command interface |
-| **Citi Bike S3** | Public source dataset |
+Stopping the stack preserves its named data volumes.
 
----
+## Stage 1 — Independent jobs
 
-## 📁 Project Structure
+```bash
+just run ingest-to-bronze trips:jc 2026-06
+just run transform-to-silver trips:jc 2026-06
+just run transform-to-gold station-daily 2026-06-02
 
-```text
-meridian-bike-pipeline/
-├── compose.yaml
-├── Dockerfile
-├── justfile
-├── requirements.txt
-├── README.md
-│
-├── sql/
-│   └── init.sql
-│
-└── src/
-    ├── __init__.py
-    ├── cli.py
-    ├── db.py
-    ├── ingest.py
-    ├── silver.py
-    ├── gold.py
-    └── inspect.py
+just inspect bronze trips:jc 2026-06
+just inspect silver trips:jc 2026-06
+just report daily-station-trips jc JC115 2026-06-02
 ```
 
-### Main Components
+Expected report:
 
-- `ingest.py` — discovers Citi Bike objects and loads published data into Bronze.
-- `silver.py` — handles schema evolution, validation, conformance, and reject quarantine.
-- `gold.py` — builds daily station-level business aggregates and reports.
-- `inspect.py` — exposes machine-readable Bronze and Silver inspection results.
-- `cli.py` — validates commands and processing grains and routes pipeline jobs.
-- `init.sql` — defines the PostgreSQL storage model.
+```json
+{"market":"jc","station":"JC115","day":"2026-06-02","departures":216,"arrivals":209}
+```
 
----
+These commands remain usable with Airflow stopped. Manual job executions
+do not write operational load records.
 
-## 🗺️ Roadmap
+Trip jobs require a monthly window (`YYYY-MM`). The Gold job requires
+a daily window (`YYYY-MM-DD`).
 
-This repository is being developed incrementally as a multi-stage data engineering project.
+## Stage 2 — Operational commands
 
-### Stage 1 — The Shape of the Job ✅
+```bash
+just schedule jc on
+just schedule jc off
 
-- Bronze → Silver → Gold pipeline
-- Historical and modern schema support
-- NYC and Jersey City market handling
-- Data quality quarantine
-- Idempotent processing
-- Daily station-level analytics
-- Containerized local environment
-- Reproducible command interface
+just run pipeline jc
+just run pipeline jc 2026-06
+just run pipeline jc 2021-01 2021-02
 
-### Stage 2 — Coming Next 🚧
+just inspect coverage trips:jc
+just inspect runs jc
+```
 
-The next stage will extend the platform with additional data engineering requirements while preserving the contracts established in Stage 1.
+| Command | Behavior |
+| --- | --- |
+| `schedule <market> on` | Enables monthly scheduling and historical catchup |
+| `schedule <market> off` | Disables future automatic scheduling after DAG refresh |
+| `run pipeline <market>` | Processes the earliest incomplete month if published |
+| `run pipeline <market> <month>` | Processes that month, including a complete month |
+| `run pipeline <market> <first> <last>` | Processes the inclusive range through Airflow backfill |
+| `inspect coverage <job>` | Computes coverage from operational load records |
+| `inspect runs <market>` | Reports Airflow runs, newest queued first |
 
-### Future Stages
+Pipeline commands block until their runs finish and return a non-zero
+exit code if any run fails.
 
-As the project evolves, each stage will build on the existing architecture rather than replacing it.
+When the next incomplete month is unpublished, a windowless request
+succeeds with `month: null` and `work: skipped`. A named unpublished
+month waits for publication and fails after the sensor timeout.
 
-The goal is to progressively turn a working data pipeline into a more complete production-style data platform.
+Disabling scheduling does not cancel runs already queued or running.
+Schedule changes take effect when Airflow reparses the touched DAG file.
+
+## Markets and earliest windows
+
+Committed configuration lives in `src/config.py`.
+
+| Market | Job | Earliest operational month |
+| --- | --- | --- |
+| Jersey City | `trips:jc` | `2021-01` |
+| NYC | `trips:nyc` | `2026-01` |
+
+Stage 1 manual jobs can still process older historical windows.
+
+## DAG structure
+
+Each market has its own DAG: `pipeline_jc` and `pipeline_nyc`.
+
+```mermaid
+flowchart TD
+    M["Select calendar month"] --> D{"Is work due?"}
+    D -->|Yes| P["Wait for publication"]
+    D -->|No| S["Skip work"]
+    P --> B["Ingest to Bronze"]
+    B --> V["Transform to Silver"]
+    V --> G["Gold batch: every day of the month"]
+```
+
+| Job task | Execution |
+| --- | --- |
+| Bronze | Imports and calls the Stage 1 ingestion job in process |
+| Silver | Runs `just run transform-to-silver` in a subprocess |
+| Gold | Calls the Stage 1 day job in a single monthly batch |
+
+The DAG file wires calls together. Processing loops, load recording,
+locking and coverage logic live in the Python package.
+
+- Calendar-month intervals use a custom monthly interval timetable.
+- Publication checks reschedule every five minutes, releasing the worker.
+- The publication timeout is seven days.
+- Job tasks allow two retries with a 30-second delay.
+- Each DAG allows up to 16 active runs and 32 active tasks.
+- PostgreSQL advisory locks coordinate concurrent month jobs and Gold days.
+- A scheduled run skips its work when its month is already complete.
+
+The Silver subprocess uses Just, Docker Compose and the Docker socket.
+It uses the same Compose project and warehouse as the parent Airflow stack.
+
+## Load recording and coverage
+
+Operational wrappers record a load only after the corresponding job
+succeeds. The control table stores the latest successful timestamp for
+each job, market and window.
+
+A month is complete when:
+1. Its Silver load is recorded.
+2. Every Gold day is recorded after that Silver load.
+
+A successful Silver rerun therefore makes old Gold records insufficient
+until the Gold days have been rebuilt.
+
+Coverage is computed when requested:
+- `watermark`: the last contiguous complete month from the earliest window.
+- `complete`: the number of complete months from the earliest window onward.
+- `gaps`: incomplete months through the newest complete month.
+- `next`: the earliest incomplete month.
+
+Example after January, February and April are complete:
+
+```json
+{"job":"trips:jc","earliest":"2021-01","watermark":"2021-02","complete":3,"gaps":["2021-03"],"next":"2021-03"}
+```
+
+Gold continues processing other days after a day fails, records successful
+days, then raises an error naming failed days. Its retry skips days already
+recorded after the current Silver load.
+
+Gold replacement uses the existing Stage 1 transaction, preserving complete
+committed answers while a day is rebuilt.
+
+## Verified results
+
+### Stage 1 data
+
+| Dataset | Bronze rows | Silver rows | Rejects |
+| --- | ---: | ---: | ---: |
+| JC 2019-06 | 39,430 | 39,430 | 0 |
+| JC 2026-06 | 109,897 | 109,510 | 387 |
+| NYC 2018-04 | 1,307,543 | 1,307,543 | 0 |
+
+### Stage 2 acceptance checks
+
+- Stage 1 job files remained unchanged.
+- Manual June jobs and inspections worked with Airflow stopped.
+- Manual and pipeline June reports were byte-identical.
+- January and February backfills succeeded with 31 and 28 Gold days.
+- A pre-history request failed on its first attempt with no load records.
+- Killing a Silver container caused an automatic retry and eventual success.
+- A Gold day failure left 29 successful days recorded; automatic retry
+  completed only the missing day.
+- Concurrent reads preserved the baseline Gold answers during rebuild.
+- Two simultaneous runs for the same month preserved data and coverage.
+- An interrupted named rerun became incomplete and was selected for recovery.
+- A complete scheduled month skipped its job tasks without changing records.
+- An unpublished windowless request succeeded without work.
+- A named unpublished month rescheduled, then failed with
+  `AirflowSensorTimeout` when elapsed time was simulated beyond seven days.
+- A fully hand-loaded January left coverage empty; the pipeline still selected it.
+- The January/February/April gap scenario selected March, then May.
+
+On a fresh isolated stack, scheduled JC history reached all 68 months
+through August 2026 with no gaps in **223.44 seconds**.
+
+September was also published at validation time on October 7, 2026:
+all 69 months through September finished in **233.89 seconds**, using
+69 successful scheduled runs.
+
+Detailed evidence and test limitations are recorded in
+[the checkpoint documents](docs/stage2/). No pre-existing automated Stage 1
+test suite was found; its documented data and command checks were exercised.
+
+## Validation scripts
+
+Scripts in `scripts/` exercise Silver retry, Gold retry, concurrent runs,
+interrupted reruns and fresh scheduled history.
+
+Several scripts deliberately kill a container, stop a scheduler or install
+temporary database failure triggers. Read their checkpoint documents and
+stack settings before running them.
+
+The scheduled-history script requires its configured test stack to have
+no prior loads or runs.
+
+## Isolated stacks
+
+Compose project names and API ports can be overridden:
+
+```bash
+COMPOSE_PROJECT_NAME=meridian-demo AIRFLOW_PORT=8083 docker compose build
+COMPOSE_PROJECT_NAME=meridian-demo AIRFLOW_PORT=8083 just up
+COMPOSE_PROJECT_NAME=meridian-demo AIRFLOW_PORT=8083 just inspect coverage trips:jc
+```
+
+Use the same environment settings for every command on that stack.
+Each project has separate warehouse and Airflow log volumes.
+
+## Main components
+
+| Path | Responsibility |
+| --- | --- |
+| `src/ingest.py` | Stage 1 source discovery and Bronze ingestion |
+| `src/silver.py` | Stage 1 schema normalization and reject quarantine |
+| `src/gold.py` | Stage 1 daily aggregation and report |
+| `src/cli.py`, `src/inspect.py` | Stage 1 command contracts |
+| `src/config.py` | Earliest operational windows |
+| `src/operations.py` | Load recording, Gold batch and computed coverage |
+| `src/pipeline.py` | Job wrappers, month selection and locks |
+| `src/schedules.py`, `src/timetable.py` | Schedule settings and monthly intervals |
+| `src/operational_cli.py` | Blocking pipeline controller |
+| `src/operational_inspect.py` | Coverage and Airflow run inspection |
+| `airflow/dags/pipelines.py` | Market DAG wiring |
+| `airflow/plugins/meridian_plugin.py` | Custom timetable registration |
+| `sql/operations.sql` | Repeatable operational schema initialization |
+| `docs/stage2/` | Incremental implementation and validation checkpoints |
+
+## Version-specific integration
+
+The backfill controller uses Airflow's internal `_create_backfill` function
+in an isolated Python subprocess to pass a decoded configuration dictionary.
+Airflow 3.1.0's CLI stored that supplied configuration as a JSON string in
+the observed environment.
+
+This integration and the metadata inspection queries must be reviewed
+before upgrading the pinned Airflow version.
