@@ -1,5 +1,5 @@
 up:
-    docker compose up -d db
+    docker compose up -d db airflow-api-server airflow-scheduler airflow-dag-processor
 
 down:
     docker compose down
