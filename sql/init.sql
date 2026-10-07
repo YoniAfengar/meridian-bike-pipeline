@@ -38,3 +38,11 @@ CREATE TABLE IF NOT EXISTS gold_station_daily (
     arrivals BIGINT NOT NULL DEFAULT 0,
     PRIMARY KEY (market, station_id, day)
 );
+
+CREATE TABLE IF NOT EXISTS operational_loads (
+    job TEXT NOT NULL,
+    market TEXT NOT NULL,
+    window_key TEXT NOT NULL,
+    loaded_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (job, market, window_key)
+);
