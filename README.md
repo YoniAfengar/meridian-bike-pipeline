@@ -1,4 +1,14 @@
-# Meridian Bike Pipeline
+# 🚲 Meridian Bike Pipeline
+
+![Python](https://img.shields.io/badge/Python-3.13-blue?logo=python&logoColor=white)
+![PostgreSQL](https://img.shields.io/badge/PostgreSQL-17-blue?logo=postgresql&logoColor=white)
+![Airflow](https://img.shields.io/badge/Apache_Airflow-3.1.0-017CEE?logo=apacheairflow&logoColor=white)
+![Docker](https://img.shields.io/badge/Docker-Compose-blue?logo=docker&logoColor=white)
+![Stage 1](https://img.shields.io/badge/Stage_1-Complete-brightgreen)
+![Stage 2](https://img.shields.io/badge/Stage_2-Complete-brightgreen)
+
+> From independently runnable jobs to an automated monthly pipeline:
+> schedules, publication waits, retries, backfills and warehouse coverage.
 
 A data engineering project built with Python, PostgreSQL 17,
 Docker Compose, Just and Apache Airflow 3.1.0.
@@ -9,7 +19,16 @@ and modern schemas in Silver, and produces daily station metrics in Gold.
 Stage 2 adds scheduling, publication waits, retries, backfills and coverage
 tracking around the unchanged Stage 1 jobs.
 
-## Project status
+---
+
+## 🎯 Project Status
+
+| Milestone | Verified result |
+| --- | --- |
+| 📦 Historical catchup | 68 complete months through August 2026 in **3m 43s** |
+| 🔄 Automatic recovery | Silver container and Gold day retries passed |
+| 📊 Coverage | Watermark, gaps and next-month selection passed |
+| 🔒 Stage 1 compatibility | Unchanged jobs and byte-identical June report |
 
 Stages 1 and 2 are implemented. Validation results and their scope are
 documented in [Stage 2 checkpoints](docs/stage2/).
@@ -17,7 +36,9 @@ documented in [Stage 2 checkpoints](docs/stage2/).
 This is a local development stack. It uses development credentials and
 mounts the Docker socket so Airflow can launch the existing Silver job.
 
-## Requirements
+---
+
+## 📋 Requirements
 
 - Docker with Docker Compose
 - Just
@@ -27,7 +48,9 @@ mounts the Docker socket so Airflow can launch the existing Silver job.
 
 Run commands from the repository root.
 
-## Start the stack
+---
+
+## 🚀 Quick Start
 
 ```bash
 docker compose build
@@ -47,7 +70,9 @@ just down
 
 Stopping the stack preserves its named data volumes.
 
-## Stage 1 — Independent jobs
+---
+
+## 🥉 Stage 1 — Independent Jobs
 
 ```bash
 just run ingest-to-bronze trips:jc 2026-06
@@ -71,7 +96,9 @@ do not write operational load records.
 Trip jobs require a monthly window (`YYYY-MM`). The Gold job requires
 a daily window (`YYYY-MM-DD`).
 
-## Stage 2 — Operational commands
+---
+
+## ⚙️ Stage 2 — Operational Commands
 
 ```bash
 just schedule jc on
@@ -105,7 +132,9 @@ month waits for publication and fails after the sensor timeout.
 Disabling scheduling does not cancel runs already queued or running.
 Schedule changes take effect when Airflow reparses the touched DAG file.
 
-## Markets and earliest windows
+---
+
+## 🌍 Markets and Historical Windows
 
 Committed configuration lives in `src/config.py`.
 
@@ -116,7 +145,9 @@ Committed configuration lives in `src/config.py`.
 
 Stage 1 manual jobs can still process older historical windows.
 
-## DAG structure
+---
+
+## 🏗️ Airflow Architecture
 
 Each market has its own DAG: `pipeline_jc` and `pipeline_nyc`.
 
@@ -150,7 +181,9 @@ locking and coverage logic live in the Python package.
 The Silver subprocess uses Just, Docker Compose and the Docker socket.
 It uses the same Compose project and warehouse as the parent Airflow stack.
 
-## Load recording and coverage
+---
+
+## 📊 Load Recording and Coverage
 
 Operational wrappers record a load only after the corresponding job
 succeeds. The control table stores the latest successful timestamp for
@@ -182,7 +215,9 @@ recorded after the current Silver load.
 Gold replacement uses the existing Stage 1 transaction, preserving complete
 committed answers while a day is rebuilt.
 
-## Verified results
+---
+
+## ✅ Verified Results
 
 ### Stage 1 data
 
@@ -223,7 +258,9 @@ Detailed evidence and test limitations are recorded in
 [the checkpoint documents](docs/stage2/). No pre-existing automated Stage 1
 test suite was found; its documented data and command checks were exercised.
 
-## Validation scripts
+---
+
+## 🧪 Validation Scripts
 
 Scripts in `scripts/` exercise Silver retry, Gold retry, concurrent runs,
 interrupted reruns and fresh scheduled history.
@@ -235,7 +272,9 @@ stack settings before running them.
 The scheduled-history script requires its configured test stack to have
 no prior loads or runs.
 
-## Isolated stacks
+---
+
+## 🐳 Isolated Test Stacks
 
 Compose project names and API ports can be overridden:
 
@@ -248,7 +287,9 @@ COMPOSE_PROJECT_NAME=meridian-demo AIRFLOW_PORT=8083 just inspect coverage trips
 Use the same environment settings for every command on that stack.
 Each project has separate warehouse and Airflow log volumes.
 
-## Main components
+---
+
+## 📁 Project Structure
 
 | Path | Responsibility |
 | --- | --- |
@@ -267,7 +308,9 @@ Each project has separate warehouse and Airflow log volumes.
 | `sql/operations.sql` | Repeatable operational schema initialization |
 | `docs/stage2/` | Incremental implementation and validation checkpoints |
 
-## Version-specific integration
+---
+
+## 🔧 Airflow Version Compatibility
 
 The backfill controller uses Airflow's internal `_create_backfill` function
 in an isolated Python subprocess to pass a decoded configuration dictionary.
