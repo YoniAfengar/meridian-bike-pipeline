@@ -56,7 +56,7 @@ The project addresses these challenges in two stages:
 
 <a id="stage-1--the-shape-of-the-job"></a>
 
-## 🥉 Stage 1 — The Shape of the Job
+# 🥉 STAGE 1 — The Shape of the Job
 
 **Purpose:** build the complete data path from published source files to
 a reproducible daily station report.
@@ -65,7 +65,17 @@ Each job has an explicit input window and can be run independently.
 This makes the processing logic usable both by hand and through the
 operational layer added in Stage 2.
 
-### 🏗️ Data Architecture
+
+### What this stage contains
+
+| Part | Contents |
+| --- | --- |
+| **1.1 — Architecture** | Source data, Bronze, Silver, Gold and reject quarantine |
+| **1.2 — Engineering challenges** | Schema evolution, archive selection, data quality, rebuilds and processing grains |
+| **1.3 — Commands** | Running and inspecting the independent jobs by hand |
+| **1.4 — Results** | Historical row counts, rejects and the station report |
+
+## 1.1 — 🏗️ Data Architecture
 
 ```mermaid
 flowchart TD
@@ -86,9 +96,9 @@ Bronze keeps the source material available for subsequent transformations.
 Silver and Gold can be rebuilt from stored upstream data without downloading
 the source again.
 
-### 🧠 Engineering Challenges
+## 1.2 — 🧠 Engineering Challenges
 
-#### 1. Schema evolution
+### 1. Schema evolution
 
 Older Citi Bike datasets use fields such as:
 
@@ -104,7 +114,7 @@ on one global schema cutover date.
 
 This allows historical and modern months to pass through the same job.
 
-#### 2. Multiple publishing conventions
+### 2. Multiple publishing conventions
 
 Jersey City and NYC use different object naming patterns.
 Some NYC historical data is published in annual archives, while other
@@ -121,7 +131,7 @@ producing **1,307,543 rows**.
 This handles the publishing layout directly instead of hiding duplicate
 exports through raw-row deduplication.
 
-#### 3. Data quality without silently losing rows
+### 3. Data quality without silently losing rows
 
 A countable trip requires:
 
@@ -144,7 +154,7 @@ For **JC June 2026**, the result was:
 The rejected rows remain available for inspection rather than disappearing
 from the processing history.
 
-#### 4. Reproducible rebuilds
+### 4. Reproducible rebuilds
 
 Silver rebuilds a market's monthly window from Bronze.
 Gold rebuilds a day's station aggregates from Silver.
@@ -155,7 +165,7 @@ do not accumulate duplicate records.
 For Gold, the deletion and replacement happen within one transaction.
 Readers continue to see committed data while the replacement is being built.
 
-#### 5. Explicit processing grains
+### 5. Explicit processing grains
 
 | Job | Window |
 | --- | --- |
@@ -165,7 +175,7 @@ Readers continue to see committed data while the replacement is being built.
 
 Incorrect grains are rejected with a non-zero exit code.
 
-### 💻 Stage 1 Commands
+## 1.3 — 💻 Manual Job Commands
 
 ```bash
 # Download and preserve a monthly source
@@ -188,7 +198,7 @@ just report daily-station-trips jc JC115 2026-06-02
 **These commands work with Airflow stopped.**
 Running them by hand does not create Stage 2 operational load records.
 
-### ✅ Stage 1 Verified Results
+## 1.4 — ✅ Verified Data and Reports
 
 | Dataset | Bronze Rows | Silver Rows | Rejects |
 | --- | ---: | ---: | ---: |
@@ -219,7 +229,7 @@ During Stage 2 validation:
 
 <a id="stage-2--survive-the-night"></a>
 
-## ⚙️ Stage 2 — Survive the Night
+# ⚙️ STAGE 2 — Survive the Night
 
 **Purpose:** keep the warehouse moving without requiring someone to
 run each command, discover new source files or recover failed work manually.
@@ -230,7 +240,22 @@ backlog loaded and a clear answer to: **how far has the warehouse got?**
 
 Stage 2 provides that operational layer around the Stage 1 jobs.
 
-### 🌍 One DAG per Market
+
+### What this stage contains
+
+| Part | Contents |
+| --- | --- |
+| **2.1 — Markets** | DAG per market and committed earliest windows |
+| **2.2 — DAG execution** | Control tasks, job tasks and execution methods |
+| **2.3 — Scheduling** | Monthly intervals, catchup, publication sensor and timeout |
+| **2.4 — Recovery** | Retries, failed Gold days and concurrent execution |
+| **2.5 — Progress** | Successful load records, completion, watermark, gaps and next month |
+| **2.6 — Commands** | Scheduling, blocking pipeline runs, backfills and inspection |
+| **2.7 — Docker bridge** | Launching the unchanged Silver job from Airflow |
+| **2.8 — Acceptance tests** | Verified behavior under normal operation and failures |
+| **2.9 — Performance** | Fresh-stack historical loading and measured timings |
+
+## 2.1 — 🌍 Markets and Historical Windows
 
 | Market | DAG | Earliest Operational Month |
 | --- | --- | --- |
@@ -242,7 +267,7 @@ Earliest windows are committed in `src/config.py`.
 Each run processes **one calendar month of one market**.
 Stage 1 manual jobs can still process older historical windows.
 
-### 🏗️ Operational Flow
+## 2.2 — 🏗️ DAG Structure and Job Execution
 
 ```mermaid
 flowchart TD
@@ -266,7 +291,7 @@ The DAG file wires calls together.
 Month selection, recording, locking, progress calculations and the Gold
 day loop live in the Python package.
 
-### ⏰ Scheduling and Publication Waits
+## 2.3 — ⏰ Scheduling and Publication Waits
 
 A custom `CronDataIntervalTimetable` uses the monthly expression
 `0 0 1 * *` in UTC.
@@ -285,7 +310,7 @@ A named manual rerun processes the requested month again.
 `just up` switches every market schedule off on each invocation.
 Schedule changes take effect after Airflow reparses the DAG.
 
-### 🔄 Recovery and Concurrency
+## 2.4 — 🔄 Retries, Recovery and Concurrency
 
 Job tasks allow **two retries**, with a **30-second delay**.
 
@@ -304,7 +329,7 @@ When one Gold day fails, the monthly batch:
 
 This avoids repeating successful days during a Gold retry.
 
-### 📚 Load Recording and Warehouse Progress
+## 2.5 — 📚 Load Recording and Coverage
 
 The operational layer writes `operational_loads` only **after a job succeeds**.
 
@@ -345,7 +370,7 @@ After January, February and April are complete:
 The next windowless request processes March.
 The following request processes May, because April is already complete.
 
-### 💻 Stage 2 Commands
+## 2.6 — 💻 Operational Commands
 
 ```bash
 # Enable or disable automatic scheduling
@@ -381,7 +406,7 @@ It does not cancel work already queued or running.
 Run inspection uses Airflow's own types, states and stored attempt counts.
 Reprocessing an existing run can increase its cumulative attempt counts.
 
-### 🐳 Silver Subprocess Bridge
+## 2.7 — 🐳 Docker and Silver Subprocess Bridge
 
 Airflow includes Just and the Docker CLI, mounts the repository, and has
 access to the Docker socket.
@@ -392,7 +417,7 @@ Compose using the same project name and warehouse.
 This keeps the Silver processing in a separate application container while
 preserving the existing job interface.
 
-### ✅ Stage 2 Acceptance Results
+## 2.8 — ✅ Acceptance and Failure Tests
 
 | Scenario | Observed Result |
 | --- | --- |
@@ -409,7 +434,7 @@ preserving the existing job interface.
 | Entire January loaded by hand | Coverage remained empty; pipeline still selected January |
 | January, February and April complete | Gap was March; windowless requests selected March, then May |
 
-### 🚀 Fresh-Stack Historical Catchup
+## 2.9 — 🚀 Historical Catchup Performance
 
 Enabling JC scheduling on a fresh isolated stack loaded:
 
