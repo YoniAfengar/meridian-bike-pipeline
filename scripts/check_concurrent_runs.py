@@ -46,6 +46,11 @@ report_command = [
 ]
 coverage_command = ["just", "inspect", "coverage", f"trips:{market}"]
 
+baseline_run = json_command(
+    ["just", "run", "pipeline", market, month]
+)
+assert baseline_run["state"] == "success"
+
 before_report = json_command(report_command)
 before_coverage = json_command(coverage_command)
 before_gold = gold_snapshot()
