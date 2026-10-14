@@ -1,5 +1,6 @@
 import csv
 import io
+import tempfile
 import zipfile
 from datetime import datetime
 from xml.etree import ElementTree
@@ -37,13 +38,15 @@ def _choose_object(market, window):
 
     if market == "jc":
         matches = [
-            obj for obj in objects
+            obj
+            for obj in objects
             if obj["key"].startswith(f"JC-{compact}")
             and obj["key"].endswith(".zip")
         ]
     else:
         matches = [
-            obj for obj in objects
+            obj
+            for obj in objects
             if not obj["key"].startswith("JC-")
             and obj["key"].endswith(".zip")
             and (
@@ -60,83 +63,101 @@ def _choose_object(market, window):
 
 def _csv_members(archive, market, window):
     year, month = window.split("-")
+    compact = f"{year}{month}"
 
     members = [
-        info for info in archive.infolist()
+        info
+        for info in archive.infolist()
         if not info.is_dir()
         and info.filename.lower().endswith(".csv")
         and "__macosx" not in info.filename.lower()
+        and compact in info.filename.replace("-", "")
     ]
 
-    if market == "nyc" and year == "2018" and month == "04":
-        preferred = [
-            info for info in members
-            if "4_April/" in info.filename
-        ]
-        if preferred:
-            return preferred
+    if not members:
+        raise ValueError(f"no CSV members found for {market} {window}")
 
-    compact = f"{year}{month}"
-    matching = [
-        info for info in members
-        if compact in info.filename.replace("-", "")
-    ]
+    groups = {}
 
-    return matching or members
+    for info in members:
+        folder = (
+            info.filename.rsplit("/", 1)[0]
+            if "/" in info.filename
+            else ""
+        )
+        groups.setdefault(folder, []).append(info)
+
+    return max(
+        groups.values(),
+        key=lambda group: max(info.date_time for info in group),
+    )
 
 
 def ingest(market, window):
     source = _choose_object(market, window)
 
-    response = requests.get(
+    with requests.get(
         OBJECT_URL.format(key=source["key"]),
         timeout=300,
-    )
-    response.raise_for_status()
+        stream=True,
+    ) as response:
+        response.raise_for_status()
 
-    with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
-        members = _csv_members(archive, market, window)
+        with tempfile.TemporaryFile() as temp_file:
+            for chunk in response.iter_content(chunk_size=1024 * 1024):
+                if chunk:
+                    temp_file.write(chunk)
 
-        with connect() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    "DELETE FROM bronze_objects WHERE market = %s AND window_key = %s",
-                    (market, window),
-                )
+            temp_file.seek(0)
 
-                for member in members:
-                    raw = archive.read(member)
+            with zipfile.ZipFile(temp_file) as archive:
+                members = _csv_members(archive, market, window)
 
-                    text = io.TextIOWrapper(
-                        io.BytesIO(raw),
-                        encoding="utf-8-sig",
-                        errors="replace",
-                        newline="",
-                    )
-                    row_count = sum(1 for _ in csv.reader(text)) - 1
-
-                    member_timestamp = datetime(*member.date_time)
-
-                    cur.execute(
-                        """
-                        INSERT INTO bronze_objects (
-                            market,
-                            window_key,
-                            object_key,
-                            member_name,
-                            member_timestamp,
-                            raw_bytes,
-                            row_count
+                with connect() as conn:
+                    with conn.cursor() as cur:
+                        cur.execute(
+                            """
+                            DELETE FROM bronze_objects
+                            WHERE market = %s AND window_key = %s
+                            """,
+                            (market, window),
                         )
-                        VALUES (%s, %s, %s, %s, %s, %s, %s)
-                        """,
-                        (
-                            market,
-                            window,
-                            source["key"],
-                            member.filename,
-                            member_timestamp,
-                            raw,
-                            row_count,
-                        ),
-                    )
+
+                        for member in members:
+                            raw = archive.read(member)
+
+                            text = io.TextIOWrapper(
+                                io.BytesIO(raw),
+                                encoding="utf-8-sig",
+                                errors="replace",
+                                newline="",
+                            )
+                            row_count = (
+                                sum(1 for _ in csv.reader(text)) - 1
+                            )
+
+                            member_timestamp = datetime(*member.date_time)
+
+                            cur.execute(
+                                """
+                                INSERT INTO bronze_objects (
+                                    market,
+                                    window_key,
+                                    object_key,
+                                    member_name,
+                                    member_timestamp,
+                                    raw_bytes,
+                                    row_count
+                                )
+                                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                                """,
+                                (
+                                    market,
+                                    window,
+                                    source["key"],
+                                    member.filename,
+                                    member_timestamp,
+                                    raw,
+                                    row_count,
+                                ),
+                            )

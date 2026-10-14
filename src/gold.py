@@ -1,9 +1,6 @@
 from src.db import connect
 
-
 def transform(day):
-    month = day[:7]
-
     with connect() as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -20,8 +17,7 @@ def transform(day):
                         COUNT(*) AS departures,
                         0::BIGINT AS arrivals
                     FROM silver_trips
-                    WHERE window_key = %s
-                      AND started_at::date = %s
+                    WHERE started_at::date = %s
                     GROUP BY market, start_station_id
 
                     UNION ALL
@@ -32,8 +28,7 @@ def transform(day):
                         0::BIGINT AS departures,
                         COUNT(*) AS arrivals
                     FROM silver_trips
-                    WHERE window_key = %s
-                      AND ended_at::date = %s
+                    WHERE ended_at::date = %s
                     GROUP BY market, end_station_id
                 )
                 INSERT INTO gold_station_daily (
@@ -52,9 +47,8 @@ def transform(day):
                 FROM movements
                 GROUP BY market, station_id
                 """,
-                (month, day, month, day, day),
+                (day, day, day),
             )
-
 
 def report(market, station, day):
     import json

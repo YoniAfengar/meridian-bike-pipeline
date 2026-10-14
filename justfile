@@ -6,7 +6,7 @@ up:
     docker compose up -d airflow-api-server airflow-scheduler airflow-dag-processor
 
 down:
-    docker compose down
+    docker compose down -v
 
 schedule market state:
     docker compose exec -T airflow-scheduler python -m src.operational_cli schedule "{{market}}" "{{state}}"
